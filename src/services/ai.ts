@@ -26,7 +26,29 @@ interface GeminiResponse {
 const API_KEY = 'AIzaSyC-do77zfjKjZjMski7yLhGA-yBltlSKww';
 const API_URL =
   'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent';
-const MAX_DAYS = 3;
+const MAX_DAYS = 4;
+
+function formatDetailedDate(date: Date): string {
+  return date.toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
+function getSeason(date: Date): string {
+  const month = date.getMonth() + 1;
+  if (month >= 3 && month <= 5) {
+    return 'Spring';
+  } else if (month >= 6 && month <= 8) {
+    return 'Summer';
+  } else if (month >= 9 && month <= 11) {
+    return 'Autumn';
+  } else {
+    return 'Winter';
+  }
+}
 
 function formatDates(dateRange: { start: Date; end: Date }): string {
   return `${dateRange.start.toLocaleDateString()} to ${dateRange.end.toLocaleDateString()}`;
@@ -38,10 +60,18 @@ function getPromptByMode(
   duration: number,
   mode: ThemeMode
 ): string {
-  const actualDuration = Math.min(duration, MAX_DAYS);
+  const startDate = preferences.dateRange.start;
+  const endDate = preferences.dateRange.end;
+  const actualDuration =
+    Math.ceil(
+      (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)
+    ) + 1;
 
-  // Structured system prompt to enforce JSON compliance
-  const systemPrompt = `You are a travel itinerary planning assistant. Your task is to create a detailed ${actualDuration}-day itinerary for ${destination.name}, ${destination.country}.
+  const systemPrompt = `You are a travel itinerary planning assistant. Your task is to create a detailed ${actualDuration}-day itinerary for ${destination.name}, ${destination.country} from ${formatDetailedDate(
+    startDate
+  )} to ${formatDetailedDate(
+    endDate
+  )} during ${getSeason(startDate)} season.
 Please follow these strict guidelines:
 1. Provide output in valid JSON format only
 2. No markdown code blocks or decorators
@@ -56,10 +86,8 @@ Please follow these strict guidelines:
 
   const preferencesDescription = `
 Travel Parameters:
-- Style: ${preferences.travelStyle} travel for ${
-    preferences.groupSize
-  } person(s)
-- Daily Budget: ${preferences.budgetPerDay} USD
+- Style: ${preferences.travelStyle} travel for ${preferences.groupSize} person(s)
+- Budget Preference: ${preferences.budget}
 - Activity Level: ${preferences.activityLevel}
 - Interests: ${preferences.specialInterests.join(', ')}
 - Dietary: ${
@@ -127,6 +155,7 @@ Required JSON Structure:
         }
       }
     }
+    // Include at least 3 accommodation options
   ],
   "transportInfo": {
     "taxiServices": [
@@ -237,8 +266,12 @@ Key Requirements:
 6. Account for local customs
 7. Include meal recommendations
 8. Provide local currency pricing
-${preferences.restDays ? '9. Balance activities with rest' : ''}
-${preferences.photoOpportunities ? '10. Highlight photography spots' : ''}`;
+9. Must include at least 3 accommodation recommendations
+${
+  preferences.restDays ? '10. Balance activities with rest' : ''
+}${
+    preferences.photoOpportunities ? '11. Highlight photography spots' : ''
+  }`;
 
   const validationRules = `
 Validation Rules:
@@ -251,7 +284,8 @@ Validation Rules:
 7. All number fields must contain actual numbers, not strings
 8. All string fields must use double quotes
 9. No trailing commas in objects or arrays
-10. All activities must have valid times in 24-hour format (HH:MM)`;
+10. All activities must have valid times in 24-hour format (HH:MM)
+11. The "accommodationOptions" array must contain at least 3 items`;
 
   return `${systemPrompt}
 
@@ -259,13 +293,19 @@ ${preferencesDescription}
 
 ${additionalParams}
 
+Please consider the following temporal factors:
+- Time of year: ${startDate.toLocaleString('en-US', { month: 'long' })}
+- Season: ${getSeason(startDate)}
+- Day of week start: ${startDate.toLocaleString('en-US', { weekday: 'long' })}
+- Day of week end: ${endDate.toLocaleString('en-US', { weekday: 'long' })}
+
+Travel Dates: ${formatDates(preferences.dateRange)}
+
 ${requirements}
 
 ${outputFormat}
 
 ${validationRules}
-
-Travel Dates: ${formatDates(preferences.dateRange)}
 
 Respond with only the JSON data structure. No additional text, comments, or markdown.`;
 }
@@ -290,7 +330,7 @@ async function validateResponse(data: any): Promise<boolean> {
         return false;
       }
     }
-
+  
     // Days array validation
     if (!Array.isArray(data.days) || data.days.length === 0) {
       console.error('Days array is empty or invalid');
@@ -372,13 +412,13 @@ async function parseGeminiResponse(responseText: string): Promise<any> {
       try {
         return JSON.parse(responseText);
       } catch (parseError) {
-        // Only if direct parsing fails, attempt to clean markdown
+        // Attempt to clean any markdown code blocks or decorators
         let jsonStr = responseText.replace(/```json\s*|\s*```/g, '').trim();
         return JSON.parse(jsonStr);
       }
     }
 
-    // If somehow the response is already an object, return it
+    // If the response is already an object, return it
     if (typeof responseText === 'object' && responseText !== null) {
       return responseText;
     }
@@ -399,7 +439,12 @@ async function generateItinerary(
   mode: ThemeMode = 'luxury'
 ): Promise<Itinerary | null> {
   try {
-    const actualDuration = Math.min(duration, MAX_DAYS);
+    const actualDuration =
+      Math.ceil(
+        (preferences.dateRange.end.getTime() -
+          preferences.dateRange.start.getTime()) /
+          (1000 * 60 * 60 * 24)
+      ) + 1;
     const prompt = getPromptByMode(
       destination,
       preferences,
@@ -500,7 +545,12 @@ async function generateItineraryWithRetry(
   mode: ThemeMode = 'luxury',
   maxRetries = 3
 ): Promise<Itinerary | null> {
-  const actualDuration = Math.min(duration, MAX_DAYS);
+  const actualDuration =
+    Math.ceil(
+      (preferences.dateRange.end.getTime() -
+        preferences.dateRange.start.getTime()) /
+        (1000 * 60 * 60 * 24)
+    ) + 1;
   const cacheKey = JSON.stringify({
     destination,
     preferences,

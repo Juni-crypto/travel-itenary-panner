@@ -65,7 +65,7 @@ export function ItineraryView({ itinerary, onBack }: Props) {
 
   const handleShare = async (
     platform?: 'instagram' | 'facebook' | 'twitter'
-  ) => {
+  ) =>  {
     try {
       if (platform) {
         await shareToSocialMedia(itinerary, mode, platform);
@@ -174,8 +174,8 @@ export function ItineraryView({ itinerary, onBack }: Props) {
           </button>
 
           <button
-            onClick={handleShare}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-700 hover:border-gray-600 transition-colors"
+          onClick={() => handleShare()}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-700 hover:border-gray-600 transition-colors"
           >
             <Share2 size={18} />
             <span className="hidden sm:inline">Share</span>

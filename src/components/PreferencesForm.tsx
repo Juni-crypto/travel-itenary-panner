@@ -27,8 +27,6 @@ import {
   Plane,
   ArrowRight,
 } from 'lucide-react';
-import { ExperienceSelector } from './ExperienceSelector';
-import { BudgetSlider } from './BudgetSlider';
 import { useTheme } from '../contexts/ThemeContext';
 import type {
   TripPreferences,
@@ -66,6 +64,7 @@ const BACKPACKING_PRESETS = {
 export function PreferencesForm({ onSubmit }: Props) {
   const { mode, colors } = useTheme();
   const [isFormValid, setIsFormValid] = React.useState(false);
+  const [dateError, setDateError] = React.useState('');
 
   // Initialize preferences based on mode
   const [preferences, setPreferences] = React.useState<TripPreferences>(() => ({
@@ -74,11 +73,10 @@ export function PreferencesForm({ onSubmit }: Props) {
         ? LUXURY_PRESETS.interests
         : BACKPACKING_PRESETS.interests,
     budget: mode === 'luxury' ? 'luxury' : 'budget',
-    budgetPerDay: mode === 'luxury' ? 800 : 50,
     activityLevel: 'moderate',
     dateRange: {
       start: new Date(),
-      end: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      end: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
     },
     accommodation:
       mode === 'luxury'
@@ -117,7 +115,7 @@ export function PreferencesForm({ onSubmit }: Props) {
   const validateForm = React.useCallback(() => {
     const requiredFields = [
       preferences.interests.length > 0,
-      preferences.budgetPerDay > 0,
+      preferences.budget.length > 0,
       preferences.dateRange.start instanceof Date,
       preferences.dateRange.end instanceof Date,
       preferences.accommodation.length > 0,
@@ -178,12 +176,32 @@ export function PreferencesForm({ onSubmit }: Props) {
             <input
               type="date"
               value={preferences.dateRange.start.toISOString().split('T')[0]}
-              onChange={(e) =>
+              onChange={(e) => {
+                const newStartDate = new Date(e.target.value);
+                let newEndDate = preferences.dateRange.end;
+
+                if (newEndDate < newStartDate) {
+                  newEndDate = newStartDate;
+                }
+
+                const diffTime =
+                  newEndDate.getTime() - newStartDate.getTime();
+                const diffDays = diffTime / (1000 * 60 * 60 * 24);
+
+                if (diffDays > 3) {
+                  setDateError('Team is working on that updates');
+                  newEndDate = new Date(
+                    newStartDate.getTime() + 3 * 24 * 60 * 60 * 1000
+                  );
+                } else {
+                  setDateError('');
+                }
+
                 updatePreference('dateRange', {
-                  ...preferences.dateRange,
-                  start: new Date(e.target.value),
-                })
-              }
+                  start: newStartDate,
+                  end: newEndDate,
+                });
+              }}
               min={new Date().toISOString().split('T')[0]}
               className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100"
               required
@@ -194,25 +212,74 @@ export function PreferencesForm({ onSubmit }: Props) {
             <input
               type="date"
               value={preferences.dateRange.end.toISOString().split('T')[0]}
-              onChange={(e) =>
-                updatePreference('dateRange', {
-                  ...preferences.dateRange,
-                  end: new Date(e.target.value),
-                })
-              }
-              min={preferences.dateRange.start.toISOString().split('T')[0]}
+              onChange={(e) => {
+                const newEndDate = new Date(e.target.value);
+                const diffTime =
+                  newEndDate.getTime() -
+                  preferences.dateRange.start.getTime();
+                const diffDays = diffTime / (1000 * 60 * 60 * 24);
+
+                if (diffDays > 3) {
+                  setDateError('Team is working on that updates');
+                  const correctedEndDate = new Date(
+                    preferences.dateRange.start.getTime() +
+                      3 * 24 * 60 * 60 * 1000
+                  );
+                  updatePreference('dateRange', {
+                    ...preferences.dateRange,
+                    end: correctedEndDate,
+                  });
+                } else {
+                  setDateError('');
+                  updatePreference('dateRange', {
+                    ...preferences.dateRange,
+                    end: newEndDate,
+                  });
+                }
+              }}
+              min={preferences.dateRange.start
+                .toISOString()
+                .split('T')[0]}
               className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100"
               required
             />
           </div>
         </div>
+        {dateError && (
+          <p className="text-red-400 text-sm mt-2">{dateError}</p>
+        )}
       </div>
 
-      {/* Budget */}
-      <BudgetSlider
-        value={preferences.budgetPerDay}
-        onChange={(value) => updatePreference('budgetPerDay', value)}
-      />
+      {/* Budget Preference */}
+      <div className="space-y-4">
+        <div className="flex items-center gap-2">
+          <h3 className={`font-medium ${colors.primary}`}>
+            Budget Preference
+          </h3>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {[
+            { value: 'budget', label: 'Budget' },
+            { value: 'moderate', label: 'Moderate' },
+            { value: 'luxury', label: 'Luxury' },
+          ].map(({ value, label }) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => updatePreference('budget', value)}
+              className={`px-4 py-2 rounded-lg text-sm border transition-colors ${
+                preferences.budget === value
+                  ? mode === 'luxury'
+                    ? 'bg-gold text-black border-gold'
+                    : 'bg-adventure-500 text-black border-adventure-500'
+                  : 'border-gray-700 text-gray-300 hover:border-gray-600'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
 
       {/* Travel Style */}
       <div className="space-y-4">
@@ -272,7 +339,9 @@ export function PreferencesForm({ onSubmit }: Props) {
       <div className="space-y-4">
         <div className="flex items-center gap-2">
           <Heart className={colors.primary} size={20} />
-          <h3 className={`font-medium ${colors.primary}`}>Special Interests</h3>
+          <h3 className={`font-medium ${colors.primary}`}>
+            Special Interests
+          </h3>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           {specialInterests.map(({ icon: Icon, label, value }) => (
@@ -307,7 +376,9 @@ export function PreferencesForm({ onSubmit }: Props) {
         <div className="space-y-4">
           <div className="flex items-center gap-2">
             <Activity className={colors.primary} size={20} />
-            <h3 className={`font-medium ${colors.primary}`}>Activity Level</h3>
+            <h3 className={`font-medium ${colors.primary}`}>
+              Activity Level
+            </h3>
           </div>
           <div className="flex flex-wrap gap-2">
             {[
@@ -338,7 +409,9 @@ export function PreferencesForm({ onSubmit }: Props) {
         <div className="space-y-4">
           <div className="flex items-center gap-2">
             <Clock className={colors.primary} size={20} />
-            <h3 className={`font-medium ${colors.primary}`}>Travel Pace</h3>
+            <h3 className={`font-medium ${colors.primary}`}>
+              Travel Pace
+            </h3>
           </div>
           <div className="flex flex-wrap gap-2">
             {[
@@ -371,7 +444,9 @@ export function PreferencesForm({ onSubmit }: Props) {
       <div className="space-y-4">
         <div className="flex items-center gap-2">
           <Clock className={colors.primary} size={20} />
-          <h3 className={`font-medium ${colors.primary}`}>Preferred Times</h3>
+          <h3 className={`font-medium ${colors.primary}`}>
+            Preferred Times
+          </h3>
         </div>
         <div className="flex flex-wrap gap-2">
           {[
@@ -408,7 +483,9 @@ export function PreferencesForm({ onSubmit }: Props) {
       <div className="space-y-4">
         <div className="flex items-center gap-2">
           <Hotel className={colors.primary} size={20} />
-          <h3 className={`font-medium ${colors.primary}`}>Accommodation</h3>
+          <h3 className={`font-medium ${colors.primary}`}>
+            Accommodation
+          </h3>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           {(mode === 'luxury'
@@ -521,7 +598,9 @@ export function PreferencesForm({ onSubmit }: Props) {
                 if (diet === 'none') {
                   updatePreference('dietaryRestrictions', []);
                 } else {
-                  const newDiet = preferences.dietaryRestrictions.includes(diet)
+                  const newDiet = preferences.dietaryRestrictions.includes(
+                    diet
+                  )
                     ? preferences.dietaryRestrictions.filter((d) => d !== diet)
                     : [...preferences.dietaryRestrictions, diet];
                   updatePreference('dietaryRestrictions', newDiet);
