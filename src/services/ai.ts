@@ -113,7 +113,7 @@ function getPromptByMode(
   9. All URLs should be valid https:// URLs
   10. All coordinates should be valid numbers within range`;
 
-  console.log(preferences)
+  console.log(preferences);
   const preferencesDescription = `
   Travel Parameters:
   - Style: ${preferences.travelStyle} travel for ${preferences.groupSize} person(s)
@@ -362,7 +362,7 @@ async function validateResponse(data: any): Promise<boolean> {
         return false;
       }
     }
-  
+
     // Days array validation
     if (!Array.isArray(data.days) || data.days.length === 0) {
       console.error('Days array is empty or invalid');
@@ -522,14 +522,11 @@ async function generateItinerary(
     if (data.promptFeedback?.blockReason) {
       console.error(`Content blocked: ${data.promptFeedback.blockReason}`);
       throw new Error(`Content blocked: ${data.promptFeedback.blockReason}`);
-      return null;
     }
 
     if (!data.candidates?.[0]?.content?.parts?.[0]?.text) {
       console.error('Invalid response structure from AI service');
       throw new Error('Invalid response structure from AI service');
-      return null;
-      
     }
 
     const responseText = data.candidates[0].content.parts[0].text;
@@ -538,14 +535,12 @@ async function generateItinerary(
     if (!itineraryData) {
       console.error('Failed to parse AI response');
       throw new Error('Failed to parse AI response');
-      return null;
     }
 
     const isValid = await validateResponse(itineraryData);
     if (!isValid) {
       console.error('Validation failed for AI response');
       throw new Error('Validation failed for AI response');
-      return null;
     }
 
     const processedDays = itineraryData.days.map((day: any) => ({
@@ -577,8 +572,7 @@ async function generateItinerary(
     return completeItinerary;
   } catch (error) {
     console.error('Error in generateItinerary:', error);
-    throw new Error('Error in generateItinerary:', error);
-    return null;
+    throw error; // Re-throw the error to be caught in generateItineraryWithRetry
   }
 }
 
@@ -624,10 +618,10 @@ async function generateItineraryWithRetry(
         requestCache.set(cacheKey, result);
         setTimeout(() => requestCache.delete(cacheKey), REQUEST_TIMEOUT);
         return result;
+      } else {
+        // Treat null result as an error to trigger retry
+        throw new Error('generateItinerary returned null');
       }
-
-      // If result is null but no error was thrown, wait before retry
-      await new Promise((resolve) => setTimeout(resolve, 1000 * (i + 1)));
     } catch (error) {
       lastError = error;
       console.error(`Attempt ${i + 1} failed:`, error);
