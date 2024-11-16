@@ -17,6 +17,11 @@ export interface Destination {
   timezone?: string;
 }
 
+export interface TravelRoute {
+  from: Destination | null;
+  to: Destination;
+}
+
 export interface DateRange {
   start: Date;
   end: Date;
@@ -56,6 +61,7 @@ export interface TripPreferences {
   language: string[];
   weatherPreference: WeatherPreference;
   shoppingPreferences: string[];
+  route?: TravelRoute; // Optional route information for from/to places
 }
 
 export interface AccommodationOption {
@@ -100,7 +106,17 @@ export interface TransportInfo {
     options: string[];
     dayPassCost: number;
   };
+  allModes: {
+    type: string;
+    details: string;
+  }[];
+  bikeRentalOptions: {
+    providerName: string;
+    rentalRate: number;
+    bookingUrl: string;
+  }[];
 }
+
 
 export interface Meal {
   time: string;
@@ -189,6 +205,7 @@ export interface EssentialInfo {
 
 export interface Itinerary {
   destination: Destination;
+  route?: TravelRoute; // Optional route information for from/to places
   duration: number;
   preferences: TripPreferences;
   mode: ThemeMode;

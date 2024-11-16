@@ -8,25 +8,24 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import ThemeToggle from './components/ThemeToggle';
 import { ThemeProvider, useTheme } from './contexts/ThemeContext';
 import { generateItinerary } from './services/ai';
-import type { Destination, TripPreferences, Itinerary } from './types';
+import type { TripPreferences, Itinerary, TravelRoute } from './types';
 
 function AppContent() {
   const { mode, colors } = useTheme();
   const [step, setStep] = React.useState(1);
-  const [selectedDestination, setSelectedDestination] =
-    React.useState<Destination | null>(null);
+  const [selectedRoute, setSelectedRoute] = React.useState<TravelRoute | null>(null);
   const [itinerary, setItinerary] = React.useState<Itinerary | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
-  const handleDestinationSelect = (destination: Destination) => {
-    setSelectedDestination(destination);
+  const handleRouteSelect = (route: TravelRoute) => {
+    setSelectedRoute(route);
     setStep(2);
     setError(null);
   };
 
   const handlePreferencesSubmit = async (preferences: TripPreferences) => {
-    if (!selectedDestination) return;
+    if (!selectedRoute) return;
 
     setLoading(true);
     setError(null);
@@ -38,13 +37,26 @@ function AppContent() {
           (1000 * 60 * 60 * 24)
       );
 
+      // Add route information to preferences
+      const preferencesWithRoute = {
+        ...preferences,
+        route: selectedRoute
+      };
+
       const generatedItinerary = await generateItinerary(
-        selectedDestination,
-        preferences,
+        selectedRoute.to, // Main destination remains the "to" location
+        preferencesWithRoute,
         duration,
         mode
       );
-      setItinerary(generatedItinerary);
+
+      // Add route information to itinerary
+      const itineraryWithRoute = {
+        ...generatedItinerary,
+        route: selectedRoute
+      };
+
+      setItinerary(itineraryWithRoute);
       setStep(3);
     } catch (err) {
       setError('Failed to generate itinerary. Please try again.');
@@ -55,7 +67,7 @@ function AppContent() {
 
   const handleBack = () => {
     setStep(1);
-    setSelectedDestination(null);
+    setSelectedRoute(null);
     setItinerary(null);
     setError(null);
   };
@@ -82,7 +94,7 @@ function AppContent() {
 
             <p className="text-gray-400 max-w-2xl mx-auto">
               {mode === 'luxury'
-                ? 'Create your perfect luxury travel itinerary with our AI-powered planner. Select your destination, set your preferences, and let us craft your dream journey.'
+                ? 'Create your perfect luxury travel itinerary with our AI-powered planner. Select your destinations, set your preferences, and let us craft your dream journey.'
                 : 'Plan your next adventure with our backpacker-friendly travel planner. Find the best hostels, local experiences, and budget-friendly activities for an unforgettable journey.'}
             </p>
           </div>
@@ -113,16 +125,19 @@ function AppContent() {
                   >
                     Where would you like to go?
                   </h2>
-                  <DestinationSelector onSelect={handleDestinationSelect} />
+                  <DestinationSelector onSelect={handleRouteSelect} />
                 </div>
               )}
 
-              {step === 2 && selectedDestination && (
+              {step === 2 && selectedRoute && (
                 <div className="animate-fadeIn">
                   <h2
                     className={`text-2xl font-semibold text-center mb-8 ${colors.primary}`}
                   >
-                    Customize your trip to {selectedDestination.name}
+                    {selectedRoute.from 
+                      ? `Customize your trip from ${selectedRoute.from.name} to ${selectedRoute.to.name}`
+                      : `Customize your trip to ${selectedRoute.to.name}`
+                    }
                   </h2>
                   <PreferencesForm onSubmit={handlePreferencesSubmit} />
                 </div>

@@ -1,6 +1,6 @@
 import React from 'react';
-import { Search, MapPin } from 'lucide-react';
-import type { Destination } from '../types';
+import { Search, MapPin, ArrowRight } from 'lucide-react';
+import type { Destination, TravelRoute } from '../types';
 
 interface LocationSuggestion {
   place_id: string;
@@ -17,21 +17,34 @@ interface LocationSuggestion {
 }
 
 interface Props {
-  onSelect: (destination: Destination) => void;
+  onSelect: (route: TravelRoute) => void;
 }
 
-// Changed to named export
 export function DestinationSelector({ onSelect }: Props) {
-  const [searchQuery, setSearchQuery] = React.useState('');
-  const [suggestions, setSuggestions] = React.useState<LocationSuggestion[]>(
-    []
-  );
-  const [showSuggestions, setShowSuggestions] = React.useState(false);
-  const searchTimeout = React.useRef<number>();
+  const [showFromPlace, setShowFromPlace] = React.useState(false);
+  const [fromSearchQuery, setFromSearchQuery] = React.useState('');
+  const [toSearchQuery, setToSearchQuery] = React.useState('');
+  const [fromSuggestions, setFromSuggestions] = React.useState<LocationSuggestion[]>([]);
+  const [toSuggestions, setToSuggestions] = React.useState<LocationSuggestion[]>([]);
+  const [showFromSuggestions, setShowFromSuggestions] = React.useState(false);
+  const [showToSuggestions, setShowToSuggestions] = React.useState(false);
+  const [selectedFromPlace, setSelectedFromPlace] = React.useState<Destination | null>(null);
+  const [selectedToPlace, setSelectedToPlace] = React.useState<Destination | null>(null);
+  const fromSearchTimeout = React.useRef<number>();
+  const toSearchTimeout = React.useRef<number>();
 
-  const fetchSuggestions = async (query: string) => {
+  React.useEffect(() => {
+    if (selectedToPlace) {
+      onSelect({
+        from: selectedFromPlace,
+        to: selectedToPlace
+      });
+    }
+  }, [selectedFromPlace, selectedToPlace, onSelect]);
+
+  const fetchSuggestions = async (query: string, isFrom: boolean) => {
     if (!query) {
-      setSuggestions([]);
+      isFrom ? setFromSuggestions([]) : setToSuggestions([]);
       return;
     }
 
@@ -59,11 +72,20 @@ export function DestinationSelector({ onSelect }: Props) {
           display_name: formatLocationName(item),
         }));
 
-      setSuggestions(cityResults);
-      setShowSuggestions(true);
+      // Filter out the selected "From" place from "To" suggestions
+      if (!isFrom && selectedFromPlace) {
+        const filteredResults = cityResults.filter(
+          (item) => item.place_id !== selectedFromPlace.id
+        );
+        setToSuggestions(filteredResults);
+      } else {
+        isFrom ? setFromSuggestions(cityResults) : setToSuggestions(cityResults);
+      }
+
+      isFrom ? setShowFromSuggestions(true) : setShowToSuggestions(true);
     } catch (error) {
       console.error('Error fetching suggestions:', error);
-      setSuggestions([]);
+      isFrom ? setFromSuggestions([]) : setToSuggestions([]);
     }
   };
 
@@ -79,20 +101,31 @@ export function DestinationSelector({ onSelect }: Props) {
     return parts.join(', ');
   };
 
-  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSearchChange = (
+    e: React.ChangeEvent<HTMLInputElement>,
+    isFrom: boolean
+  ) => {
     const query = e.target.value;
-    setSearchQuery(query);
+    isFrom ? setFromSearchQuery(query) : setToSearchQuery(query);
 
-    if (searchTimeout.current) {
-      window.clearTimeout(searchTimeout.current);
+    if (isFrom && fromSearchTimeout.current) {
+      window.clearTimeout(fromSearchTimeout.current);
+    } else if (!isFrom && toSearchTimeout.current) {
+      window.clearTimeout(toSearchTimeout.current);
     }
 
-    searchTimeout.current = window.setTimeout(() => {
-      fetchSuggestions(query);
+    const timeoutRef = window.setTimeout(() => {
+      fetchSuggestions(query, isFrom);
     }, 300);
+
+    if (isFrom) {
+      fromSearchTimeout.current = timeoutRef;
+    } else {
+      toSearchTimeout.current = timeoutRef;
+    }
   };
 
-  const handleSuggestionSelect = (suggestion: LocationSuggestion) => {
+  const createDestination = (suggestion: LocationSuggestion): Destination => {
     const city =
       suggestion.address.city ||
       suggestion.address.name ||
@@ -100,7 +133,7 @@ export function DestinationSelector({ onSelect }: Props) {
       '';
     const country = suggestion.address.country || 'Unknown';
 
-    const destination: Destination = {
+    return {
       id: suggestion.place_id,
       name: city,
       country: country,
@@ -111,31 +144,106 @@ export function DestinationSelector({ onSelect }: Props) {
       imageUrl:
         'https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?auto=format&fit=crop&q=80&w=1000',
     };
+  };
 
-    setSearchQuery(city);
-    setSuggestions([]);
-    setShowSuggestions(false);
-    onSelect(destination);
+  const handleSuggestionSelect = (suggestion: LocationSuggestion, isFrom: boolean) => {
+    const destination = createDestination(suggestion);
+
+    if (isFrom) {
+      setFromSearchQuery(destination.name);
+      setSelectedFromPlace(destination);
+      setFromSuggestions([]);
+      setShowFromSuggestions(false);
+      
+      // Clear "To" selection if it matches the new "From" selection
+      if (selectedToPlace && destination.id === selectedToPlace.id) {
+        setToSearchQuery('');
+        setSelectedToPlace(null);
+      }
+    } else {
+      setToSearchQuery(destination.name);
+      setSelectedToPlace(destination);
+      setToSuggestions([]);
+      setShowToSuggestions(false);
+    }
+  };
+
+  const handleFromToggle = () => {
+    const newShowFromPlace = !showFromPlace;
+    setShowFromPlace(newShowFromPlace);
+    if (!newShowFromPlace) {
+      setFromSearchQuery('');
+      setSelectedFromPlace(null);
+      setFromSuggestions([]);
+      setShowFromSuggestions(false);
+    }
   };
 
   return (
-    <div className="w-full max-w-4xl">
+    <div className="w-full max-w-4xl space-y-6">
+      {/* Toggle switch for "Add From Place" */}
+      <div className="flex items-center justify-end gap-2">
+        <label className="text-gray-400 text-sm">Add From Place</label>
+        <button
+          onClick={handleFromToggle}
+          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+            showFromPlace ? 'bg-gold' : 'bg-gray-700'
+          }`}
+        >
+          <span
+            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+              showFromPlace ? 'translate-x-6' : 'translate-x-1'
+            }`}
+          />
+        </button>
+      </div>
+
+      {/* From Place Search */}
+      {showFromPlace && (
+        <div className="relative">
+          <input
+            type="text"
+            value={fromSearchQuery}
+            onChange={(e) => handleSearchChange(e, true)}
+            placeholder="From where?"
+            className="w-full px-4 py-3 pl-12 rounded-lg bg-gray-900 border border-gray-700 text-gray-100 placeholder-gray-500 focus:border-gold focus:ring-2 focus:ring-gold/20 transition-all"
+          />
+          <Search className="absolute left-4 top-3.5 text-gray-500" size={20} />
+
+          {showFromSuggestions && fromSuggestions.length > 0 && (
+            <div className="location-dropdown">
+              {fromSuggestions.map((suggestion) => (
+                <button
+                  key={suggestion.place_id}
+                  onClick={() => handleSuggestionSelect(suggestion, true)}
+                  className="w-full px-4 py-3 text-left hover:bg-gray-800 flex items-center gap-2 transition-colors"
+                >
+                  <MapPin size={16} className="text-gold flex-shrink-0" />
+                  <span className="text-gray-300">{suggestion.display_name}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* To Place Search */}
       <div className="relative">
         <input
           type="text"
-          value={searchQuery}
-          onChange={handleSearchChange}
-          placeholder="Search destinations..."
+          value={toSearchQuery}
+          onChange={(e) => handleSearchChange(e, false)}
+          placeholder={showFromPlace ? "Where to?" : "Search destinations..."}
           className="w-full px-4 py-3 pl-12 rounded-lg bg-gray-900 border border-gray-700 text-gray-100 placeholder-gray-500 focus:border-gold focus:ring-2 focus:ring-gold/20 transition-all"
         />
         <Search className="absolute left-4 top-3.5 text-gray-500" size={20} />
 
-        {showSuggestions && suggestions.length > 0 && (
+        {showToSuggestions && toSuggestions.length > 0 && (
           <div className="location-dropdown">
-            {suggestions.map((suggestion) => (
+            {toSuggestions.map((suggestion) => (
               <button
                 key={suggestion.place_id}
-                onClick={() => handleSuggestionSelect(suggestion)}
+                onClick={() => handleSuggestionSelect(suggestion, false)}
                 className="w-full px-4 py-3 text-left hover:bg-gray-800 flex items-center gap-2 transition-colors"
               >
                 <MapPin size={16} className="text-gold flex-shrink-0" />
@@ -145,6 +253,15 @@ export function DestinationSelector({ onSelect }: Props) {
           </div>
         )}
       </div>
+
+      {/* Visual separator when both inputs are shown */}
+      {showFromPlace && selectedFromPlace && toSearchQuery && (
+        <div className="flex items-center justify-center gap-2">
+          <div className="h-px w-full bg-gray-700" />
+          <ArrowRight className="text-gray-500" size={20} />
+          <div className="h-px w-full bg-gray-700" />
+        </div>
+      )}
     </div>
   );
 }
