@@ -25,7 +25,7 @@ interface GeminiResponse {
 
 const API_KEY = 'AIzaSyC-do77zfjKjZjMski7yLhGA-yBltlSKww';
 const API_URL =
-  'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent';
+  'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-002:generateContent';
 const MAX_DAYS = 4;
 
 function formatDetailedDate(date: Date): string {
