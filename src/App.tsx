@@ -34,7 +34,7 @@ function AppContent() {
       const duration = Math.ceil(
         (preferences.dateRange.end.getTime() -
           preferences.dateRange.start.getTime()) /
-          (1000 * 60 * 60 * 24)
+        (1000 * 60 * 60 * 24)
       );
 
       // Add route information to preferences
@@ -134,7 +134,7 @@ function AppContent() {
                   <h2
                     className={`text-2xl font-semibold text-center mb-8 ${colors.primary}`}
                   >
-                    {selectedRoute.from 
+                    {selectedRoute.from
                       ? `Customize your trip from ${selectedRoute.from.name} to ${selectedRoute.to.name}`
                       : `Customize your trip to ${selectedRoute.to.name}`
                     }
@@ -162,7 +162,20 @@ function AppContent() {
               Chumaoru Works Creative Club
             </a>
           </p>
+          <p className="mt-2">
+          We'd love to hear your feedback and suggestions for improvement. Please submit them{' '}
+            <a
+              href="https://forms.gle/XdEGo3jf3jfZxCeT8"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-gold hover:text-gold-light transition-colors"
+              aria-label="Submit your feedback and suggestions for improvement"
+            >
+              here
+            </a>.
+          </p>
         </footer>
+
       </div>
     </div>
   );
