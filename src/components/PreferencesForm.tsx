@@ -28,6 +28,7 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
+import { sendGAEvent } from '../utils/ga';
 import type {
   TripPreferences,
   ActivityLevel,
@@ -142,6 +143,14 @@ export function PreferencesForm({ onSubmit }: Props) {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (isFormValid) {
+      // Emit GA event before submitting preferences
+      sendGAEvent({
+        action: 'create_itinerary',
+        category: 'Itinerary',
+        label: preferences.travelStyle, // You can choose any label that makes sense
+        value: preferences.groupSize,   // You can choose any numeric value that makes sense
+      });
+  
       onSubmit(preferences);
     }
   };
