@@ -183,12 +183,13 @@ export interface SeasonalInfo {
 }
 
 export interface CostBreakdown {
-  totalCost: number;
-  currency: string;
-  breakdown: Array<{
-    category: string;
-    amount: number;
-  }>;
+  totalEstimatedCost: number;
+  categories: {
+    accommodation: number;
+    transportation: number;
+    activities: number;
+    meals: number;
+  };
 }
 
 export interface EssentialInfo {
@@ -203,6 +204,36 @@ export interface EssentialInfo {
   languages: string[];
 }
 
+interface TransportationRoute {
+  type: string;
+  provider: string;
+  schedule: string;
+  duration: string;
+  cost: number;
+  bookingUrl: string;
+  notes: string[];
+}
+
+interface TransportationHub {
+  name: string;
+  type: string;
+  location: {
+    coordinates: {
+      lat: number;
+      lng: number;
+    };
+  };
+  transportOptions: string[];
+  facilities: string[];
+  distance: number;
+}
+
+interface TransportationDetails {
+  routes: TransportationRoute[];
+  hubs: TransportationHub[];
+}
+
+
 export interface Itinerary {
   destination: Destination;
   route?: TravelRoute; // Optional route information for from/to places
@@ -214,6 +245,7 @@ export interface Itinerary {
   accommodationOptions: AccommodationOption[];
   transportInfo: TransportInfo;
   days: ItineraryDay[];
+  transportationDetails?: TransportationDetails; // New field for route-specific transport info
   essentialInfo: EssentialInfo;
   seasonalInfo: SeasonalInfo;
   costBreakdown: CostBreakdown;

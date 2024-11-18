@@ -3,7 +3,9 @@ import type {
   TripPreferences,
   Itinerary,
   ThemeMode,
+  TravelRoute,
 } from '../types';
+import axios from 'axios';
 
 interface GeminiResponse {
   candidates?: Array<{
@@ -23,10 +25,72 @@ interface GeminiResponse {
   };
 }
 
+interface UnsplashResponse {
+  results: Array<{
+    urls: {
+      regular: string;
+    };
+  }>;
+}
+
+interface RetryState {
+  attempt: number;
+  maxAttempts: number;
+  lastError?: Error;
+  validationFailed?: boolean;
+  parseFailed?: boolean;
+}
+
 const API_KEY = 'AIzaSyC-do77zfjKjZjMski7yLhGA-yBltlSKww';
-const API_URL =
-  'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-002:generateContent';
+const UNSPLASH_API_KEY = '9HV9pC4NmeYTLu6_KXYPuBnL7Bg6o9GlLE4LDYmfr-M'; // Replace with actual key
+const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-002:generateContent';
 const MAX_DAYS = 4;
+const MAX_RETRIES = 5;
+const RETRY_DELAY = 1000;
+const MAX_VALIDATION_RETRIES = 3;
+const MAX_PARSE_RETRIES = 3;
+
+async function fetchDestinationImage(destination: string): Promise<string> {
+  try {
+    const response = await fetch(
+      `https://api.unsplash.com/search/photos?query=${encodeURIComponent(
+        destination
+      )}&client_id=${UNSPLASH_API_KEY}&orientation=landscape&per_page=1`
+    );
+    
+    if (!response.ok) {
+      throw new Error('Failed to fetch image');
+    }
+
+    const data: UnsplashResponse = await response.json();
+    return data.results[0]?.urls.regular || '/default-destination.jpg';
+  } catch (error) {
+    console.error('Error fetching image:', error);
+    return '/default-destination.jpg';
+  }
+}
+
+export async function fetchDestinationImages(destination: string): Promise<string[]> {
+  try {
+    const response = await axios.get(`https://api.unsplash.com/search/photos`, {
+      params: {
+        query: destination,
+        per_page: 15,
+      },
+      headers: {
+        Authorization: `Client-ID ${UNSPLASH_API_KEY}`,
+      },
+    });
+    return response.data.results.map((photo: any) => photo.urls.regular);
+  } catch (error) {
+    console.error('Error fetching images:', error);
+    return [];
+  }
+}
+
+function calculateBackoff(attempt: number, baseDelay: number = RETRY_DELAY): number {
+  return Math.min(baseDelay * Math.pow(2, attempt), 10000); // Cap at 10 seconds
+}
 
 function formatDetailedDate(date: Date): string {
   return date.toLocaleDateString('en-US', {
@@ -39,21 +103,47 @@ function formatDetailedDate(date: Date): string {
 
 function getSeason(date: Date): string {
   const month = date.getMonth() + 1;
-  if (month >= 3 && month <= 5) {
-    return 'Spring';
-  } else if (month >= 6 && month <= 8) {
-    return 'Summer';
-  } else if (month >= 9 && month <= 11) {
-    return 'Autumn';
-  } else {
-    return 'Winter';
-  }
+  if (month >= 3 && month <= 5) return 'Spring';
+  if (month >= 6 && month <= 8) return 'Summer';
+  if (month >= 9 && month <= 11) return 'Autumn';
+  return 'Winter';
 }
 
 function formatDates(dateRange: { start: Date; end: Date }): string {
   return `${dateRange.start.toLocaleDateString()} to ${dateRange.end.toLocaleDateString()}`;
 }
 
+function getRoutePrompt(route: TravelRoute): string {
+  if (!route.from) return '';
+
+  return `
+    Transportation Between Cities:
+    1. Consider transportation options from ${route.from.name} to ${route.to.name}
+    2. Include the following details:
+       - Available modes of transportation (air, rail, road, sea)
+       - Approximate travel times for each mode
+       - Cost ranges for each option
+       - Major transportation hubs (airports, train stations, bus terminals)
+       - Recommended routes and carriers
+       - Seasonal considerations for travel between these cities
+       - Local transportation options upon arrival
+    3. For each transportation mode, provide:
+       - Schedule frequency
+       - Comfort level
+       - Booking recommendations
+       - Required documentation
+    4. Include nearby stations and transportation hubs:
+       - Major airports within 100km
+       - Main train stations
+       - Bus terminals
+       - Port facilities if applicable
+    5. Consider factors like:
+       - Peak vs. off-peak pricing
+       - Baggage restrictions
+       - Transfer requirements
+       - Visa/immigration considerations for transit
+  `;
+}
 function getPromptByMode(
   destination: Destination,
   preferences: TripPreferences,
@@ -62,45 +152,63 @@ function getPromptByMode(
 ): string {
   const startDate = preferences.dateRange.start;
   const endDate = preferences.dateRange.end;
-  const actualDuration =
-    Math.ceil(
-      (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)
-    ) + 1;
+  const actualDuration = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
 
-  // Added budgetBarriers function
   const budgetBarriers = () => {
     if (mode === 'luxury') {
       switch (preferences.budget) {
-        case 'luxury':
-          return 'Set a high budget barrier to include premium accommodations and exclusive activities.';
-        case 'moderate':
-          return 'Set a medium budget barrier to balance comfort with cost-effective options.';
-        case 'budget':
-          return 'Set a low budget barrier to prioritize essential experiences over luxury.';
-        default:
-          return '';
+        case 'luxury': return 'Set a high budget barrier to include premium accommodations and exclusive activities.';
+        case 'moderate': return 'Set a medium budget barrier to balance comfort with cost-effective options.';
+        case 'budget': return 'Set a low budget barrier to prioritize essential experiences over luxury.';
+        default: return '';
       }
     } else if (mode === 'backpacking') {
       switch (preferences.budget) {
-        case 'luxury':
-          return 'Set a high budget barrier to include quality accommodations while maintaining affordability.';
-        case 'moderate':
-          return 'Set a medium budget barrier to balance between cost and experience.';
-        case 'budget':
-          return 'Set a low budget barrier to maximize affordability with basic accommodations and activities.';
-        default:
-          return '';
+        case 'luxury': return 'Set a high budget barrier to include quality accommodations while maintaining affordability.';
+        case 'moderate': return 'Set a medium budget barrier to balance between cost and experience.';
+        case 'budget': return 'Set a low budget barrier to maximize affordability with basic accommodations and activities.';
+        default: return '';
       }
     }
     return '';
   };
 
-  const systemPrompt = `You are a travel itinerary planning assistant. Your task is to create a detailed ${actualDuration}-day itinerary for ${destination.name}, ${destination.country} from ${formatDetailedDate(
-    startDate
-  )} to ${formatDetailedDate(
-    endDate
-  )} during ${getSeason(startDate)} season.
+  const routeInformation = preferences.route ? getRoutePrompt(preferences.route) : '';
+
+  const transportationDetails = preferences.route?.from ? `
+    "transportationDetails": {
+      "routes": [
+        {
+          "type": string,
+          "provider": string,
+          "schedule": string,
+          "duration": string,
+          "cost": number,
+          "bookingUrl": string,
+          "notes": string[]
+        }
+      ],
+      "hubs": [
+        {
+          "name": string,
+          "type": string,
+          "location": {
+            "coordinates": {
+              "lat": number,
+              "lng": number
+            }
+          },
+          "transportOptions": string[],
+          "facilities": string[],
+          "distance": number
+        }
+      ]
+    },` : '';
+
+  const systemPrompt = `You are a travel itinerary planning assistant. Your task is to create a detailed ${actualDuration}-day itinerary for ${destination.name}, ${destination.country} from ${formatDetailedDate(startDate)} to ${formatDetailedDate(endDate)} during ${getSeason(startDate)} season.
   ${budgetBarriers()}
+  ${routeInformation}
+  
   Please follow these strict guidelines:
   1. Provide output in valid JSON format only
   2. No markdown code blocks or decorators
@@ -111,20 +219,21 @@ function getPromptByMode(
   7. Use consistent date formats (ISO 8601)
   8. All numerical values should be actual numbers, not strings
   9. All URLs should be valid https:// URLs
-  10. All coordinates should be valid numbers within range`;
+  10. All coordinates should be valid numbers within range
 
-  console.log(preferences);
+  If a route is specified, include detailed transportation information in the response, including:
+  - Schedule details for transportation options
+  - Connection information at major hubs
+  - Local transfer options at both origin and destination
+  - Cost breakdown for each transportation mode`;
+
   const preferencesDescription = `
   Travel Parameters:
   - Style: ${preferences.travelStyle} travel for ${preferences.groupSize} person(s)
   - Budget Preference: ${preferences.budget}
   - Activity Level: ${preferences.activityLevel}
   - Interests: ${preferences.specialInterests.join(', ')}
-  - Dietary: ${
-    preferences.dietaryRestrictions.length > 0
-      ? preferences.dietaryRestrictions.join(', ')
-      : 'None'
-  }
+  - Dietary: ${preferences.dietaryRestrictions.length > 0 ? preferences.dietaryRestrictions.join(', ') : 'None'}
   - Languages: ${preferences.language.join(', ')}
   - Preferred Times: ${preferences.timeOfDay.join(', ')}
   - Pace: ${preferences.pacePreference}
@@ -142,20 +251,14 @@ function getPromptByMode(
   - Weather: ${preferences.weatherPreference}
   - Shopping: ${preferences.shoppingPreferences.join(', ')}
   - Nightlife: ${preferences.nightlifePreferences.join(', ')}
-  ${
-    preferences.accessibility.length > 0
-      ? `- Accessibility: ${preferences.accessibility.join(', ')}`
-      : ''
-  }`;
+  ${preferences.accessibility.length > 0 ? `- Accessibility: ${preferences.accessibility.join(', ')}` : ''}`;
 
-  const experienceType =
-    mode === 'luxury'
-      ? 'premium and exclusive'
-      : 'authentic and budget-friendly';
+  const experienceType = mode === 'luxury' ? 'premium and exclusive' : 'authentic and budget-friendly';
 
   const outputFormat = `
   Required JSON Structure:
   {
+    ${transportationDetails}
     "recommendedDuration": {
       "minimum": number,
       "maximum": number,
@@ -185,7 +288,6 @@ function getPromptByMode(
           }
         }
       }
-      // Include at least 3 accommodation options
     ],
     "transportInfo": {
       "taxiServices": [
@@ -236,6 +338,8 @@ function getPromptByMode(
             "weatherDependent": boolean,
             "intensity": string
           }
+          // Repeat for at least 3-4 activities detailed ones
+          // Mandatory 3 activities needed in a day and detailed ones
         ],
         "meals": [
           {
@@ -259,15 +363,9 @@ function getPromptByMode(
       }
     ],
     "essentialInfo": {
+      "healthAndSafety": string,
       "visaRequirements": string,
-      "vaccinations": string[],
-      "emergencyContacts": {
-        "police": string,
-        "ambulance": string,
-        "tourOperator": string
-      },
-      "timeZone": string,
-      "languages": string[]
+      "localEmergencyContacts": string
     },
     "seasonalInfo": {
       "weather": string,
@@ -275,48 +373,37 @@ function getPromptByMode(
       "peakTouristSeason": string
     },
     "costBreakdown": {
-      "totalCost": number,
-      "currency": string,
-      "breakdown": [
-        {
-          "category": string,
-          "amount": number
-        }
-      ]
+      "totalEstimatedCost": number,
+      "categories": {
+        "accommodation": number,
+        "transportation": number,
+        "activities": number,
+        "meals": number
+      }
     },
-    "dailyBudgetSpent": number
+    "dailyBudgetSpent": number,
+    "activities": [
+      {
+        "name": string,
+        "description": string,
+        "duration": string,
+        "startTime": string,
+        "location": {
+          "name": string,
+          "coordinates": {
+            "lat": number,
+            "lng": number
+          }
+        },
+        "cost": number,
+        "bookingUrl": string,
+        "photoSpot": boolean,
+        "weatherDependent": boolean,
+        "intensity": string
+      },
+      // Repeat for at least 3-4 activities
+    ],
   }`;
-
-  const requirements = `
-  Key Requirements:
-  1. Focus on ${experienceType} experiences
-  2. Include specific venues and locations
-  3. Provide transportation options
-  4. Include photo opportunities
-  5. Consider weather and seasonal factors
-  6. Account for local customs
-  7. Include meal recommendations
-  8. Provide local currency pricing
-  9. Must include at least 3 accommodation recommendations
-  ${
-    preferences.restDays ? '10. Balance activities with rest' : ''
-  }${
-    preferences.photoOpportunities ? '11. Highlight photography spots' : ''
-  }`;
-
-  const validationRules = `
-  Validation Rules:
-  1. All dates must be in ISO 8601 format
-  2. All coordinates must be valid latitude/longitude values
-  3. All URLs must start with https://
-  4. All required fields must be present
-  5. No null values allowed - use empty strings or 0 for optional fields
-  6. Arrays must contain at least one item
-  7. All number fields must contain actual numbers, not strings
-  8. All string fields must use double quotes
-  9. No trailing commas in objects or arrays
-  10. All activities must have valid times in 24-hour format (HH:MM)
-  11. The "accommodationOptions" array must contain at least 3 items`;
 
   return `${systemPrompt}
 
@@ -332,16 +419,24 @@ function getPromptByMode(
 
   Travel Dates: ${formatDates(preferences.dateRange)}
 
-  ${requirements}
+  Key Requirements:
+  1. Focus on ${experienceType} experiences
+  2. Include specific venues and locations
+  3. Provide transportation options
+  4. Include photo opportunities
+  5. Consider weather and seasonal factors
+  6. Account for local customs
+  7. Include meal recommendations
+  8. Provide local currency pricing
+  9. Must include at least 3 accommodation recommendations
+  ${preferences.restDays ? '10. Balance activities with rest' : ''}
+  ${preferences.photoOpportunities ? '11. Highlight photography spots' : ''}
 
   ${outputFormat}
 
-  ${validationRules}
-
   Respond with only the JSON data structure. No additional text, comments, or markdown.`;
 }
-
-async function validateResponse(data: any): Promise<boolean> {
+async function validateResponse(data: any, route?: TravelRoute): Promise<boolean> {
   try {
     // Required fields check
     const requiredFields = [
@@ -353,8 +448,12 @@ async function validateResponse(data: any): Promise<boolean> {
       'essentialInfo',
       'seasonalInfo',
       'costBreakdown',
-      'dailyBudgetSpent', // Added dailyBudgetSpent
+      'dailyBudgetSpent',
     ];
+
+    if (route?.from) {
+      requiredFields.push('transportationDetails');
+    }
 
     for (const field of requiredFields) {
       if (!(field in data)) {
@@ -363,7 +462,43 @@ async function validateResponse(data: any): Promise<boolean> {
       }
     }
 
-    // Days array validation
+    // Validate transportation details if route exists
+    if (route?.from && data.transportationDetails) {
+      if (!Array.isArray(data.transportationDetails.routes) || 
+          !Array.isArray(data.transportationDetails.hubs)) {
+        console.error('Invalid transportation details structure');
+        return false;
+      }
+
+      // Validate each route
+      for (const route of data.transportationDetails.routes) {
+        if (!route.type || !route.provider || !route.schedule || 
+            typeof route.cost !== 'number' || !Array.isArray(route.notes)) {
+          console.error('Invalid route structure:', route);
+          return false;
+        }
+      }
+
+      // Validate each hub
+      for (const hub of data.transportationDetails.hubs) {
+        if (!hub.name || !hub.type || !hub.location?.coordinates ||
+            typeof hub.distance !== 'number' || !Array.isArray(hub.transportOptions) ||
+            !Array.isArray(hub.facilities)) {
+          console.error('Invalid hub structure:', hub);
+          return false;
+        }
+
+        // Validate coordinates
+        const coords = hub.location.coordinates;
+        if (typeof coords.lat !== 'number' || typeof coords.lng !== 'number' ||
+            coords.lat < -90 || coords.lat > 90 || coords.lng < -180 || coords.lng > 180) {
+          console.error('Invalid coordinates in hub:', hub.name);
+          return false;
+        }
+      }
+    }
+
+    // Validate days array
     if (!Array.isArray(data.days) || data.days.length === 0) {
       console.error('Days array is empty or invalid');
       return false;
@@ -383,19 +518,26 @@ async function validateResponse(data: any): Promise<boolean> {
 
       // Validate activities
       for (const activity of day.activities) {
-        if (!activity.name || !activity.duration || !activity.location) {
+        if (!activity.name || !activity.duration || !activity.location ||
+            typeof activity.cost !== 'number' || 
+            typeof activity.photoSpot !== 'boolean' ||
+            typeof activity.weatherDependent !== 'boolean') {
           console.error('Invalid activity structure:', activity);
           return false;
         }
 
         // Validate coordinates
         const coords = activity.location.coordinates;
-        if (
-          !coords ||
-          typeof coords.lat !== 'number' ||
-          typeof coords.lng !== 'number'
-        ) {
+        if (!coords || typeof coords.lat !== 'number' || typeof coords.lng !== 'number' ||
+            coords.lat < -90 || coords.lat > 90 || coords.lng < -180 || coords.lng > 180) {
           console.error('Invalid coordinates:', coords);
+          return false;
+        }
+
+        // Validate time format
+        const timeRegex = /^(?:[0-9]|[01]\d|2[0-3]):([0-5]\d)$/;
+        if (!timeRegex.test(activity.startTime)) {
+          console.error('Invalid time format:', activity.startTime);
           return false;
         }
       }
@@ -403,7 +545,9 @@ async function validateResponse(data: any): Promise<boolean> {
       // Validate meals
       if (Array.isArray(day.meals)) {
         for (const meal of day.meals) {
-          if (!meal.time || !meal.venue) {
+          if (!meal.time || !meal.venue || !meal.priceRange ||
+              typeof meal.priceRange.min !== 'number' ||
+              typeof meal.priceRange.max !== 'number') {
             console.error('Invalid meal structure:', meal);
             return false;
           }
@@ -412,27 +556,27 @@ async function validateResponse(data: any): Promise<boolean> {
     }
 
     // Validate currency information
-    if (
-      !data.localCurrency?.code ||
-      !data.localCurrency?.symbol ||
-      typeof data.localCurrency?.exchangeRate !== 'number'
-    ) {
+    if (!data.localCurrency?.code || !data.localCurrency?.symbol ||
+        typeof data.localCurrency?.exchangeRate !== 'number') {
       console.error('Invalid currency information');
       return false;
     }
 
     // Validate cost breakdown
-    if (
-      !data.costBreakdown?.totalCost ||
-      !Array.isArray(data.costBreakdown.breakdown)
-    ) {
+    if (!data.costBreakdown?.totalEstimatedCost || typeof data.costBreakdown.categories !== 'object') {
       console.error('Invalid cost breakdown');
       return false;
     }
 
-    // Validate dailyBudgetSpent
-    if (typeof data.dailyBudgetSpent !== 'number') {
-      console.error('Invalid or missing dailyBudgetSpent');
+    // Validate accommodation options
+    if (!Array.isArray(data.accommodationOptions) || data.accommodationOptions.length < 3) {
+      console.error('Insufficient accommodation options');
+      return false;
+    }
+
+    // Validate daily budget
+    if (typeof data.dailyBudgetSpent !== 'number' || data.dailyBudgetSpent <= 0) {
+      console.error('Invalid daily budget spent');
       return false;
     }
 
@@ -442,21 +586,32 @@ async function validateResponse(data: any): Promise<boolean> {
     return false;
   }
 }
-
 async function parseGeminiResponse(responseText: string): Promise<any> {
   try {
-    // If the response is already a valid JSON string, parse it directly
+    // First attempt: direct parse
     if (typeof responseText === 'string') {
       try {
+        console.log(JSON.parse(responseText))
         return JSON.parse(responseText);
       } catch (parseError) {
-        // Attempt to clean any markdown code blocks or decorators
-        let jsonStr = responseText.replace(/```json\s*|\s*```/g, '').trim();
+        // Clean any markdown code blocks or decorators
+        let jsonStr = responseText
+          .replace(/```json\s*|\s*```/g, '')
+          .replace(/^[\s\n]+|[\s\n]+$/g, ''); // Trim whitespace and newlines
+        
+        // Remove any non-JSON text before or after
+        const firstBrace = jsonStr.indexOf('{');
+        const lastBrace = jsonStr.lastIndexOf('}');
+        if (firstBrace !== -1 && lastBrace !== -1) {
+          jsonStr = jsonStr.slice(firstBrace, lastBrace + 1);
+        }
+        console.log(JSON.parse(jsonStr))
         return JSON.parse(jsonStr);
+
       }
     }
 
-    // If the response is already an object, return it
+    // If response is already an object
     if (typeof responseText === 'object' && responseText !== null) {
       return responseText;
     }
@@ -470,99 +625,142 @@ async function parseGeminiResponse(responseText: string): Promise<any> {
   }
 }
 
-async function generateItinerary(
-  destination: Destination,
-  preferences: TripPreferences,
-  duration: number,
-  mode: ThemeMode = 'luxury'
-): Promise<Itinerary | null> {
+async function makeApiRequest(prompt: string, retryState: RetryState): Promise<any> {
   try {
-    const actualDuration =
-      Math.ceil(
-        (preferences.dateRange.end.getTime() -
-          preferences.dateRange.start.getTime()) /
-          (1000 * 60 * 60 * 24)
-      ) + 1;
-    const prompt = getPromptByMode(
-      destination,
-      preferences,
-      actualDuration,
-      mode
-    );
-
     const response = await fetch(`${API_URL}?key=${API_KEY}`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contents: [
-          {
-            parts: [{ text: prompt }],
-          },
-        ],
-        safetySettings: [
-          {
-            category: 'HARM_CATEGORY_DANGEROUS_CONTENT',
-            threshold: 'BLOCK_MEDIUM_AND_ABOVE',
-          },
-        ],
+        contents: [{
+          parts: [{ text: prompt }],
+        }],
+        safetySettings: [{
+          category: 'HARM_CATEGORY_DANGEROUS_CONTENT',
+          threshold: 'BLOCK_MEDIUM_AND_ABOVE',
+        }],
       }),
     });
 
     if (!response.ok) {
-      console.error(`HTTP error! status: ${response.status}`);
-      const errorText = await response.text();
-      console.error('Error details:', errorText);
       throw new Error(`HTTP error! status: ${response.status}`);
     }
 
     const data: GeminiResponse = await response.json();
 
     if (data.promptFeedback?.blockReason) {
-      console.error(`Content blocked: ${data.promptFeedback.blockReason}`);
       throw new Error(`Content blocked: ${data.promptFeedback.blockReason}`);
     }
 
     if (!data.candidates?.[0]?.content?.parts?.[0]?.text) {
-      console.error('Invalid response structure from AI service');
       throw new Error('Invalid response structure from AI service');
     }
 
-    const responseText = data.candidates[0].content.parts[0].text;
-    const itineraryData = await parseGeminiResponse(responseText);
+    return data.candidates[0].content.parts[0].text;
+  } catch (error) {
+    console.error(`API request failed (attempt ${retryState.attempt + 1}/${retryState.maxAttempts}):`, error);
+    
+    if (retryState.attempt < retryState.maxAttempts) {
+      const delay = calculateBackoff(retryState.attempt);
+      await new Promise(resolve => setTimeout(resolve, delay));
+      return makeApiRequest(prompt, {
+        ...retryState,
+        attempt: retryState.attempt + 1,
+      });
+    }
+    
+    throw error;
+  }
+}
 
-    if (!itineraryData) {
-      console.error('Failed to parse AI response');
-      throw new Error('Failed to parse AI response');
+async function generateItinerary(
+  destination: Destination,
+  preferences: TripPreferences,
+  duration: number,
+  mode: ThemeMode = 'luxury'
+): Promise<Itinerary | null> {
+  const retryState: RetryState = {
+    attempt: 0,
+    maxAttempts: MAX_RETRIES,
+    validationFailed: false,
+    parseFailed: false,
+  };
+
+  try {
+    const actualDuration = Math.ceil(
+      (preferences.dateRange.end.getTime() - preferences.dateRange.start.getTime()) /
+      (1000 * 60 * 60 * 24)
+    ) + 1;
+
+    const prompt = getPromptByMode(destination, preferences, actualDuration, mode);
+    let responseText = await makeApiRequest(prompt, retryState);
+    let itineraryData: any = null;
+    let isValid = false;
+
+    // Parsing retry loop
+    while (!itineraryData && retryState.attempt < MAX_PARSE_RETRIES) {
+      try {
+        itineraryData = await parseGeminiResponse(responseText);
+        if (!itineraryData) {
+          retryState.parseFailed = true;
+          retryState.attempt++;
+          responseText = await makeApiRequest(prompt, retryState);
+        }
+      } catch (error) {
+        if (retryState.attempt >= MAX_PARSE_RETRIES - 1) throw error;
+        retryState.attempt++;
+        const delay = calculateBackoff(retryState.attempt);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        responseText = await makeApiRequest(prompt, retryState);
+      }
     }
 
-    const isValid = await validateResponse(itineraryData);
+    // Validation retry loop
+    retryState.attempt = 0;
+    while (!isValid && retryState.attempt < MAX_VALIDATION_RETRIES) {
+      isValid = await validateResponse(itineraryData, preferences.route);
+      if (!isValid) {
+        retryState.validationFailed = true;
+        retryState.attempt++;
+        if (retryState.attempt < MAX_VALIDATION_RETRIES) {
+          const delay = calculateBackoff(retryState.attempt);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          responseText = await makeApiRequest(prompt, retryState);
+          itineraryData = await parseGeminiResponse(responseText);
+        }
+      }
+    }
+
     if (!isValid) {
-      console.error('Validation failed for AI response');
-      throw new Error('Validation failed for AI response');
+      throw new Error('Failed to generate valid itinerary after multiple attempts');
     }
 
+    // Fetch destination image
+    const imageUrl = await fetchDestinationImage(`${destination.name} ${destination.country} landmarks`);
+    
+    // Process the days to include proper dates
     const processedDays = itineraryData.days.map((day: any) => ({
       ...day,
-      date: new Date(
-        preferences.dateRange.start.getTime() +
-          (day.day - 1) * 24 * 60 * 60 * 1000
-      ).toISOString(),
+      date: new Date(preferences.dateRange.start.getTime() + (day.day - 1) * 24 * 60 * 60 * 1000).toISOString(),
     }));
 
+    // Construct the complete itinerary
     const completeItinerary: Itinerary = {
-      destination,
+      destination: {
+        ...destination,
+        imageUrl, // Add the fetched image URL
+      },
       duration: actualDuration,
       preferences: {
         ...preferences,
-        budgetPerDay: itineraryData.dailyBudgetSpent, // Fixed dailyBudgetSpent
+        budgetPerDay: itineraryData.dailyBudgetSpent,
       },
       mode,
+      route: preferences.route,
       recommendedDuration: itineraryData.recommendedDuration,
       localCurrency: itineraryData.localCurrency,
       accommodationOptions: itineraryData.accommodationOptions,
       transportInfo: itineraryData.transportInfo,
+      transportationDetails: itineraryData.transportationDetails,
       days: processedDays,
       essentialInfo: itineraryData.essentialInfo,
       seasonalInfo: itineraryData.seasonalInfo,
@@ -572,10 +770,9 @@ async function generateItinerary(
     return completeItinerary;
   } catch (error) {
     console.error('Error in generateItinerary:', error);
-    throw error; // Re-throw the error to be caught in generateItineraryWithRetry
+    throw error;
   }
 }
-
 const requestCache = new Map<string, Itinerary>();
 const REQUEST_TIMEOUT = 5000;
 
@@ -584,14 +781,12 @@ async function generateItineraryWithRetry(
   preferences: TripPreferences,
   duration: number,
   mode: ThemeMode = 'luxury',
-  maxRetries = 3
 ): Promise<Itinerary | null> {
-  const actualDuration =
-    Math.ceil(
-      (preferences.dateRange.end.getTime() -
-        preferences.dateRange.start.getTime()) /
-        (1000 * 60 * 60 * 24)
-    ) + 1;
+  const actualDuration = Math.ceil(
+    (preferences.dateRange.end.getTime() - preferences.dateRange.start.getTime()) /
+    (1000 * 60 * 60 * 24)
+  ) + 1;
+
   const cacheKey = JSON.stringify({
     destination,
     preferences,
@@ -599,43 +794,53 @@ async function generateItineraryWithRetry(
     mode,
   });
 
+  // Check cache first
   if (requestCache.has(cacheKey)) {
     return requestCache.get(cacheKey)!;
   }
 
   let lastError: any;
-  for (let i = 0; i < maxRetries; i++) {
-    try {
-      const result = await generateItinerary(
-        destination,
-        preferences,
-        actualDuration,
-        mode
-      );
+  const retryState: RetryState = {
+    attempt: 0,
+    maxAttempts: MAX_RETRIES,
+  };
 
+  while (retryState.attempt < retryState.maxAttempts) {
+    try {
+      const result = await generateItinerary(destination, preferences, actualDuration, mode);
+      
       if (result) {
-        // Cache the successful result
+        // Cache successful result
         requestCache.set(cacheKey, result);
         setTimeout(() => requestCache.delete(cacheKey), REQUEST_TIMEOUT);
         return result;
       } else {
-        // Treat null result as an error to trigger retry
         throw new Error('generateItinerary returned null');
       }
     } catch (error) {
       lastError = error;
-      console.error(`Attempt ${i + 1} failed:`, error);
+      console.error(`Attempt ${retryState.attempt + 1} failed:`, error);
 
-      // Exponential backoff for retries
-      const backoffTime = Math.min(1000 * Math.pow(2, i), 5000);
-      await new Promise((resolve) => setTimeout(resolve, backoffTime));
+      retryState.attempt++;
+
+      if (retryState.attempt < retryState.maxAttempts) {
+        // Add jitter to backoff
+        const jitter = Math.random() * 1000;
+        const backoffTime = Math.min(calculateBackoff(retryState.attempt) + jitter, 10000);
+        await new Promise(resolve => setTimeout(resolve, backoffTime));
+      }
     }
   }
 
-  console.error(
-    'Failed to generate itinerary after multiple attempts:',
-    lastError
-  );
+  // Log comprehensive error information
+  console.error('Failed to generate itinerary after multiple attempts:', {
+    lastError,
+    retryState,
+    destination: destination.name,
+    mode,
+    duration: actualDuration,
+  });
+
   return null;
 }
 
@@ -646,4 +851,5 @@ export {
   validateResponse,
   parseGeminiResponse,
   getPromptByMode,
+  fetchDestinationImage,
 };

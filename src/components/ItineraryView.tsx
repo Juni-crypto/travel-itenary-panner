@@ -17,6 +17,10 @@ import { useTheme } from '../contexts/ThemeContext';
 import type { Itinerary } from '../types';
 import { formatCurrency } from '../utils/currency';
 import { formatDate } from '../utils/date';
+import { fetchDestinationImages } from '../services/ai';
+import { useEffect, useState } from 'react';
+import 'react-responsive-carousel/lib/styles/carousel.min.css';
+import { Carousel } from 'react-responsive-carousel';
 
 import { generateAndDownloadPDF } from '../utils/pdf-utils';
 import { shareToSocialMedia } from '../utils/share-utils';
@@ -28,7 +32,21 @@ interface Props {
   onBack: () => void;
 }
 
+
+
 export function ItineraryView({ itinerary, onBack }: Props) {
+
+  const [destinationImages, setDestinationImages] = useState<string[]>([]);
+  // Use useEffect to fetch images when the component mounts
+  useEffect(() => {
+    const getImages = async () => {
+      const images = await fetchDestinationImages(itinerary.destination.name);
+      setDestinationImages(images);
+    };
+    getImages();
+  }, [itinerary.destination.name]);
+
+
   const { mode, colors } = useTheme();
   const [isShareModalOpen, setIsShareModalOpen] = React.useState(false);
   const [activeDay, setActiveDay] = React.useState(1);
@@ -65,7 +83,7 @@ export function ItineraryView({ itinerary, onBack }: Props) {
 
   const handleShare = async (
     platform?: 'instagram' | 'facebook' | 'twitter'
-  ) =>  {
+  ) => {
     try {
       if (platform) {
         await shareToSocialMedia(itinerary, mode, platform);
@@ -84,9 +102,8 @@ export function ItineraryView({ itinerary, onBack }: Props) {
       <div className="bg-gray-900 p-6 rounded-lg max-w-md w-full border border-gray-800">
         <div className="flex justify-between items-center mb-6">
           <h3
-            className={`text-xl font-semibold ${
-              mode === 'luxury' ? 'text-gold' : 'text-adventure-500'
-            }`}
+            className={`text-xl font-semibold ${mode === 'luxury' ? 'text-gold' : 'text-adventure-500'
+              }`}
           >
             Share Itinerary
           </h3>
@@ -98,7 +115,7 @@ export function ItineraryView({ itinerary, onBack }: Props) {
             <X size={20} />
           </button> */}
         </div>
-  
+
         <div className="space-y-4">
           {/* Instagram */}
           <button
@@ -111,7 +128,7 @@ export function ItineraryView({ itinerary, onBack }: Props) {
             </svg>
             Share to Instagram
           </button>
-  
+
           {/* Facebook */}
           <button
             onClick={() => handleShare('facebook')}
@@ -123,7 +140,7 @@ export function ItineraryView({ itinerary, onBack }: Props) {
             </svg>
             Share to Facebook
           </button>
-  
+
           {/* Twitter */}
           <button
             onClick={() => handleShare('twitter')}
@@ -136,7 +153,7 @@ export function ItineraryView({ itinerary, onBack }: Props) {
             Share to Twitter
           </button>
         </div>
-  
+
         <button
           onClick={() => setIsShareModalOpen(false)}
           className="mt-6 w-full p-4 rounded-lg border border-gray-700 text-gray-300 font-medium hover:border-gray-600 transition-colors"
@@ -146,8 +163,8 @@ export function ItineraryView({ itinerary, onBack }: Props) {
       </div>
     </div>
   );
-  
-  
+
+
 
   const handleDownload = async () => {
     try {
@@ -199,9 +216,8 @@ export function ItineraryView({ itinerary, onBack }: Props) {
 
       {/* Destination Header */}
       <div
-        className={`bg-gray-900 rounded-xl shadow-lg overflow-hidden border border-gray-800 transition-colors hover:border-${
-          mode === 'luxury' ? 'gold' : 'adventure-500'
-        } mb-8`}
+        className={`bg-gray-900 rounded-xl shadow-lg overflow-hidden border border-gray-800 transition-colors hover:border-${mode === 'luxury' ? 'gold' : 'adventure-500'
+          } mb-8`}
       >
         <div className="relative h-64">
           <img
@@ -284,68 +300,87 @@ export function ItineraryView({ itinerary, onBack }: Props) {
         )}
       </div>
 
-      {/* Essential Information */}
-      <div className="mb-8">
-        <div className="flex items-center gap-2 mb-4">
-          <AlertCircle className={colors.primary} size={20} />
-          <h2 className={`text-xl font-semibold ${colors.primary}`}>
-            Essential Information
+      {itinerary.transportationDetails && (
+        <div className="bg-gray-900 p-6 rounded-lg border border-gray-800 mb-8">
+          <h2 className={`text-xl font-semibold ${colors.primary} mb-4`}>
+            Transportation Details
           </h2>
-        </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="bg-gray-900 p-6 rounded-lg border border-gray-800">
-            <h3 className="text-lg font-medium text-gray-200 mb-4">
-              Travel Requirements
-            </h3>
-            <div className="space-y-4">
-              <div>
-                <h4 className="font-medium text-gray-300 mb-2">Visa</h4>
-                <p className="text-sm text-gray-400">
-                  {itinerary.essentialInfo.visaRequirements}
-                </p>
+          {/* Render Routes */}
+          <div className="mb-6">
+            <h3 className="text-lg font-medium text-gray-200 mb-2">Routes</h3>
+            {itinerary.transportationDetails.routes.map((route, index) => (
+              <div key={index} className="mb-4">
+                <h4 className="font-semibold text-gray-300">{route.type} - {route.provider}</h4>
+                <p className="text-gray-400">Schedule: {route.schedule}</p>
+                <p className="text-gray-400">Duration: {route.duration}</p>
+                <p className="text-gray-400">Cost: {formatLocalPrice(route.cost)}</p>
+                {route.bookingUrl && (
+                  <a
+                    href={route.bookingUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={`text-sm ${colors.primary} hover:${colors.secondary} transition-colors`}
+                  >
+                    Book Now →
+                  </a>
+                )}
+                {route.notes && route.notes.length > 0 && (
+                  <ul className="list-disc list-inside text-gray-400 mt-2">
+                    {route.notes.map((note, noteIndex) => (
+                      <li key={noteIndex}>{note}</li>
+                    ))}
+                  </ul>
+                )}
               </div>
-              <div>
-                <h4 className="font-medium text-gray-300 mb-2">Vaccinations</h4>
-                <ul className="list-disc list-inside text-sm text-gray-400">
-                  {itinerary.essentialInfo.vaccinations.map(
-                    (vaccine, index) => (
-                      <li key={index}>{vaccine}</li>
-                    )
-                  )}
-                </ul>
-              </div>
-            </div>
+            ))}
           </div>
 
-          {/* <div className="bg-gray-900 p-6 rounded-lg border border-gray-800">
-            <h3 className="text-lg font-medium text-gray-200 mb-4">
-              Emergency Contacts
-            </h3>
-            <div className="space-y-3">
-              <div className="flex justify-between">
-                <span className="text-gray-400">Police</span>
-                <span className="text-gray-200">
-                  {itinerary.essentialInfo.emergencyContacts.police}
-                </span>
+          {/* Render Hubs */}
+          <div>
+            <h3 className="text-lg font-medium text-gray-200 mb-2">Hubs</h3>
+            {itinerary.transportationDetails.hubs.map((hub, index) => (
+              <div key={index} className="mb-4">
+                <h4 className="font-semibold text-gray-300">{hub.name} ({hub.type})</h4>
+                <p className="text-gray-400">Distance: {hub.distance} km</p>
+                <p className="text-gray-400">
+                  Location: Lat {hub.location.coordinates.lat}, Lng {hub.location.coordinates.lng}
+                </p>
+                {hub.transportOptions && hub.transportOptions.length > 0 && (
+                  <div className="mt-2">
+                    <span className="text-gray-400">Transport Options:</span>
+                    <div className="flex flex-wrap gap-2 mt-1">
+                      {hub.transportOptions.map((option, optIndex) => (
+                        <span
+                          key={optIndex}
+                          className="px-2 py-1 text-xs bg-gray-800 rounded-full text-gray-300"
+                        >
+                          {option}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {hub.facilities && hub.facilities.length > 0 && (
+                  <div className="mt-2">
+                    <span className="text-gray-400">Facilities:</span>
+                    <div className="flex flex-wrap gap-2 mt-1">
+                      {hub.facilities.map((facility, facIndex) => (
+                        <span
+                          key={facIndex}
+                          className="px-2 py-1 text-xs bg-gray-800 rounded-full text-gray-300"
+                        >
+                          {facility}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
-              <div className="flex justify-between">
-                <span className="text-gray-400">Ambulance</span>
-                <span className="text-gray-200">
-                  {itinerary.essentialInfo.emergencyContacts.ambulance}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-400">Tour Operator</span>
-                <span className="text-gray-200">
-                  {itinerary.essentialInfo.emergencyContacts.tourOperator}
-                </span>
-              </div>
-            </div>
-          </div> */}
+            ))}
+          </div>
         </div>
-      </div>
-
+      )}
       {/* Accommodation Section */}
       <div className="mb-8">
         <div className="flex items-center gap-2 mb-4">
@@ -520,13 +555,12 @@ export function ItineraryView({ itinerary, onBack }: Props) {
             <button
               key={day.day}
               onClick={() => setActiveDay(day.day)}
-              className={`px-4 py-2 rounded-lg text-sm border transition-colors whitespace-nowrap ${
-                activeDay === day.day
+              className={`px-4 py-2 rounded-lg text-sm border transition-colors whitespace-nowrap ${activeDay === day.day
                   ? mode === 'luxury'
                     ? 'bg-gold text-black border-gold'
                     : 'bg-adventure-500 text-black border-adventure-500'
                   : 'border-gray-700 text-gray-300 hover:border-gray-600'
-              }`}
+                }`}
             >
               Day {day.day}
             </button>
@@ -698,6 +732,33 @@ export function ItineraryView({ itinerary, onBack }: Props) {
         )}
       </div>
 
+      {/* Image Carousel */}
+      {destinationImages.length > 0 && (
+        <div className="mb-8">
+          <h2 className={`text-xl font-semibold ${colors.primary} mb-4`}>
+            Destination Gallery
+          </h2>
+          <Carousel
+            showThumbs={false}
+            infiniteLoop
+            useKeyboardArrows
+            autoPlay
+            className="bg-gray-900 rounded-xl shadow-lg overflow-hidden border border-gray-800 transition-colors hover:border-gold mb-8"
+          >
+            {destinationImages.map((image, index) => (
+              <div key={index} className="h-72 flex items-center justify-center"> {/* Set height using Tailwind */}
+                <img
+                  src={image}
+                  alt={`Destination Image ${index + 1}`}
+                  className="h-full w-full object-cover" // Ensure images cover the container
+                />
+              </div>
+            ))}
+          </Carousel>
+        </div>
+      )}
+
+
       {/* Seasonal Information */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
         <div className="bg-gray-900 p-6 rounded-lg border border-gray-800">
@@ -729,11 +790,11 @@ export function ItineraryView({ itinerary, onBack }: Props) {
             Cost Breakdown
           </h2>
           <div className="space-y-3">
-            {itinerary.costBreakdown.breakdown.map((item, index) => (
-              <div key={index} className="flex justify-between">
-                <span className="text-gray-400">{item.category}</span>
+            {Object.entries(itinerary.costBreakdown.categories).map(([key, value]) => (
+              <div key={key} className="flex justify-between">
+                <span className="text-gray-400">{key.charAt(0).toUpperCase() + key.slice(1)}</span>
                 <span className="text-gray-200">
-                  {formatLocalPrice(item.amount)}
+                  {formatLocalPrice(value)}
                 </span>
               </div>
             ))}
@@ -741,34 +802,34 @@ export function ItineraryView({ itinerary, onBack }: Props) {
               <div className="flex justify-between font-semibold">
                 <span className="text-gray-300">Total Cost</span>
                 <span className="text-gray-200">
-                  {formatLocalPrice(itinerary.costBreakdown.totalCost)}
+                  {formatLocalPrice(itinerary.costBreakdown.totalEstimatedCost)}
                 </span>
               </div>
             </div>
           </div>
         </div>
+
+
       </div>
 
       {/* Quick Actions */}
       <div className="bottom-6 right-6 flex gap-3 print:hidden">
         <button
           onClick={onBack}
-          className={`p-3 rounded-full shadow-lg transition-colors ${
-            mode === 'luxury'
+          className={`p-3 rounded-full shadow-lg transition-colors ${mode === 'luxury'
               ? 'bg-black/50 hover:bg-black/70 text-gold'
               : 'bg-black/50 hover:bg-black/70 text-adventure-500'
-          }`}
+            }`}
         >
           <ArrowLeft size={20} />
         </button>
 
         <button
           onClick={handlePrint}
-          className={`p-3 rounded-full shadow-lg transition-colors ${
-            mode === 'luxury'
+          className={`p-3 rounded-full shadow-lg transition-colors ${mode === 'luxury'
               ? 'bg-black/50 hover:bg-black/70 text-gold'
               : 'bg-black/50 hover:bg-black/70 text-adventure-500'
-          }`}
+            }`}
         >
           <Printer size={20} />
         </button>
@@ -786,11 +847,10 @@ export function ItineraryView({ itinerary, onBack }: Props) {
 
         <button
           onClick={handleDownload}
-          className={`p-3 rounded-full shadow-lg transition-colors ${
-            mode === 'luxury'
+          className={`p-3 rounded-full shadow-lg transition-colors ${mode === 'luxury'
               ? 'bg-black/50 hover:bg-black/70 text-gold'
               : 'bg-black/50 hover:bg-black/70 text-adventure-500'
-          }`}
+            }`}
         >
           <Download size={20} />
         </button>
