@@ -52,22 +52,13 @@ export function DestinationSelector({ onSelect }: Props) {
       const response = await fetch(
         `https://api.locationiq.com/v1/autocomplete?key=pk.14f354433f3cbf27f89ab1227df9e411&q=${encodeURIComponent(
           query
-        )}&limit=5&dedupe=1&tag=place:city,place:town,boundary:administrative`
+        )}&limit=5&dedupe=1&tag=place%3Acity%2Cplace%3Atown%2Cplace%3Acountry`
       );
 
       if (!response.ok) throw new Error('Failed to fetch suggestions');
 
       const data: LocationSuggestion[] = await response.json();
-      const cityResults = data
-        .filter(
-          (item) =>
-            (item.type.includes('city') ||
-              item.type.includes('town') ||
-              item.type.includes('administrative')) &&
-            item.address &&
-            (item.address.city || item.address.state)
-        )
-        .map((item) => ({
+      const cityResults = data.map((item) => ({
           ...item,
           display_name: formatLocationName(item),
         }));
