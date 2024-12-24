@@ -41,8 +41,8 @@ interface RetryState {
   parseFailed?: boolean;
 }
 
-const API_KEY = 'AIzaSyC-do77zfjKjZjMski7yLhGA-yBltlSKww';
-const UNSPLASH_API_KEY = '9HV9pC4NmeYTLu6_KXYPuBnL7Bg6o9GlLE4LDYmfr-M'; // Replace with actual key
+const API_KEY = '<GEMINI_API>';
+const UNSPLASH_API_KEY = '<UNSPLASH-API>'; // Replace with actual key
 const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-002:generateContent';
 const MAX_DAYS = 4;
 const MAX_RETRIES = 5;
